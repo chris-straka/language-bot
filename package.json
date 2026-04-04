@@ -7,15 +7,14 @@
     "@types/bun": "latest"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@sglkc/kuroshiro": "^1.0.1",
     "@sglkc/kuroshiro-analyzer-kuromoji": "^1.0.1",
-    "discord.js": "^14.25.1",
-    "eld": "^2.0.2",
+    "discord.js": "^14.26.2",
+    "eld": "^2.0.3",
     "ollama": "^0.6.3",
-    "pinyin": "^4.0.0",
-    "wanakana": "^5.3.1"
+    "pinyin": "^4.0.0"
   }
 }
