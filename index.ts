@@ -101,9 +101,7 @@ client.on('messageCreate', async (message) => {
   if (langCode === 'nl' || langCode === 'en' || !result.isReliable()) return;
 
   // Japanese detection fix (ELD sometimes confuses JA/ZH)
-  if (langCode === 'zh' && /[\u3040-\u309F\u30A0-\u30FF]/.test(textToProcess)) {
-    langCode = 'ja';
-  }
+  if (langCode === 'zh' && /[\u3040-\u309F\u30A0-\u30FF]/.test(textToProcess)) langCode = 'ja';
 
   try {
     await message.channel.sendTyping();
