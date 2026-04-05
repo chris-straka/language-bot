@@ -7,8 +7,8 @@ import KuromojiAnalyzer from '@sglkc/kuroshiro-analyzer-kuromoji';
 import languageMap from './lang.json';
 
 const MODEL = 'qwen2.5:7b';
-// const MODEL = 'qwen3:4b';
 const MAX_LENGTH = 2000;
+const URL_REGEX = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/gi;
 
 /** Returns the language name from the emoji, or undefined if not mapped */
 function getLanguage(flag: string): string | undefined {
@@ -57,14 +57,18 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const textToProcess = cleanContent(message.content);
-  if (!textToProcess) return;
+  // Remove URLs and check for attachments (GIFs)
+  const textWithoutUrls = textToProcess.replace(URL_REGEX, '').trim();
+  
+  // If the message is only a link, only a GIF, or empty after cleaning, ignore it
+  if (!textWithoutUrls || (message.attachments.size > 0 && !textWithoutUrls)) return;
 
   // 1. Handle Mentions (Assistant Mode)
   const botMention = `<@${client.user?.id}>`;
   const botMentionNickname = `<@!${client.user?.id}>`;
 
   if (message.content.startsWith(botMention) || message.content.startsWith(botMentionNickname)) {
-    const question = textToProcess.replace(botMention, '').replace(botMentionNickname, '').trim();
+    const question = textWithoutUrls.replace(botMention, '').replace(botMentionNickname, '').trim();
     if (!question) return message.reply("Yes? How can I help?");
 
     await message.channel.sendTyping();
@@ -84,24 +88,22 @@ client.on('messageCreate', async (message) => {
   }
 
   // 2. Handle Auto-Detection (Translation to English)
-  // Fix: Check if text contains CJK (Chinese, Japanese) characters.
-  const isCJK = /[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/.test(textToProcess);
+  
+  // Check if text contains CJK (Chinese, Japanese) characters.
+  const isCJK = /[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/.test(textWithoutUrls);
 
   if (isCJK) {
-    // If it's Japanese/Chinese, just require at least 3 characters.
-    if (textToProcess.length < 3) return;
+    if (textWithoutUrls.length < 3) return;
   } else {
-    // If it's English/Romaji, require a longer message or multiple words.
-    if (textToProcess.length < 15 && textToProcess.split(/\s+/).length < 3) return;
+    if (textWithoutUrls.length < 15 && textWithoutUrls.split(/\s+/).length < 3) return;
   }
 
-  const result = eld.detect(textToProcess);
+  const result = eld.detect(textWithoutUrls);
   let langCode = result.language;
 
   if (langCode === 'nl' || langCode === 'en' || !result.isReliable()) return;
 
-  // Japanese detection fix (ELD sometimes confuses JA/ZH)
-  if (langCode === 'zh' && /[\u3040-\u309F\u30A0-\u30FF]/.test(textToProcess)) langCode = 'ja';
+  if (langCode === 'zh' && /[\u3040-\u309F\u30A0-\u30FF]/.test(textWithoutUrls)) langCode = 'ja';
 
   try {
     await message.channel.sendTyping();
@@ -109,21 +111,21 @@ client.on('messageCreate', async (message) => {
       model: MODEL,
       messages:[
         { role: 'system', content: 'Translate to English. Output ONLY the translation text. No Pinyin, No Romaji.' },
-        { role: 'user', content: textToProcess }
+        { role: 'user', content: textWithoutUrls }
       ],
-      options: { temperature: 0.3 } // Lower temp for more accurate translations
+      options: { temperature: 0.3 }
     });
 
     const translation = response.message.content.trim();
     let finalOutput = translation;
 
     if (langCode === 'zh') {
-      finalOutput = `${translation}\nPinyin: ${getPinyin(textToProcess)}`;
+      finalOutput = `${translation}\nPinyin: ${getPinyin(textWithoutUrls)}`;
     }
     
     if (langCode === 'ja') {
       if (isKuroshiroReady) {
-        const romaji = await kuroshiro.convert(textToProcess, { mode: 'spaced', to: 'romaji' });
+        const romaji = await kuroshiro.convert(textWithoutUrls, { mode: 'spaced', to: 'romaji' });
         finalOutput = `${translation}\nRomaji: ${romaji}`;
       } else {
         finalOutput = `${translation}\nRomaji: (Loading dictionary...)`;
@@ -140,18 +142,18 @@ client.on('messageCreate', async (message) => {
 client.on('messageReactionAdd', async (reaction, user) => {
   if (user.bot) return;
 
-  // Resolve partials
   if (reaction.partial) await reaction.fetch();
   if (reaction.message.partial) await reaction.message.fetch();
-
-  // Only translate on the first reaction of that type
   if (reaction.count && reaction.count > 1) return;
 
   const targetLang = getLanguage(reaction.emoji.name || '');
-  if (!targetLang) return; // Ignores non-language flags
+  if (!targetLang) return; 
 
-  const textToTranslate = cleanContent(reaction.message.content || '');
-  if (!textToTranslate) return;
+  const textToTranslate = cleanContent(reaction.message.content || '')
+    .replace(URL_REGEX, '')
+    .trim();
+    
+  if (!textToTranslate || (reaction.message.attachments.size > 0 && !textToTranslate)) return;
 
   const channel = reaction.message.channel;
   if (channel.isTextBased() && 'sendTyping' in channel) await channel.sendTyping();
@@ -172,7 +174,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const translation = response.message.content.trim();
     let finalOutput = translation;
 
-    // Format: Translation on top, Phonetics immediately below (if applicable)
     if (targetLang.includes('Chinese')) {
       finalOutput = `${translation}\n${getPinyin(translation)}`;
     } else if (targetLang === 'Japanese') {
@@ -189,7 +190,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
       allowedMentions: { repliedUser: false },
     });
 
-    // Mirror the reaction onto the reply
     if (reaction.emoji.name) await sentReply.react(reaction.emoji.name);
   } catch (err) {
     console.error("Reaction Translation Error:", err);
